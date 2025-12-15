@@ -5,11 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>نظام ذكي لرصد الصلاة وعدّ الركعات</title>
 
-  <!-- TensorFlow.js -->
-  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0"></script>
-  <!-- Pose Detection -->
+  <!-- TensorFlow.js (مطلوب لـ GitHub Pages) -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.12.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.12.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.12.0"></script>
+
+  <!-- Pose Detection + MediaPipe -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
-  <!-- MediaPipe Pose -->
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
 
   <style>
@@ -65,7 +67,7 @@
 
 <div id="info">في الانتظار...</div>
 
-<!-- الأصوات العربية -->
+<!-- الأصوات (يجب أن تكون في نفس المجلد) -->
 <audio id="qiyam" src="qiyam.mp3"></audio>
 <audio id="ruku" src="ruku.mp3"></audio>
 <audio id="sujood" src="sujood.mp3"></audio>
@@ -109,7 +111,7 @@ function angle(a, b, c) {
 function detectPrayerPose(keypoints) {
   const get = n => keypoints.find(k => k.name === n && k.score > 0.5);
 
-  // كاميرا أمامية – جانب أيمن
+  // الكاميرا الأمامية – الجانب الأيمن
   const hip = get('right_hip');
   const knee = get('right_knee');
   const ankle = get('right_ankle');
@@ -131,6 +133,7 @@ function detectPrayerPose(keypoints) {
 }
 
 async function startApp() {
+  // الكاميرا
   const stream = await navigator.mediaDevices.getUserMedia({ video: true });
   video.srcObject = stream;
 
@@ -139,9 +142,14 @@ async function startApp() {
   canvas.width = video.videoWidth;
   canvas.height = video.videoHeight;
 
+  // تحميل النموذج (إجباري لـ GitHub Pages)
   detector = await poseDetection.createDetector(
     poseDetection.SupportedModels.BlazePose,
-    { runtime: 'mediapipe', modelType: 'full' }
+    {
+      runtime: 'mediapipe',
+      modelType: 'full',
+      solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose'
+    }
   );
 
   info.innerText = 'تم التشغيل – يتم الرصد الآن';
