@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>رصد الصلاة الذكي مع تدريب شخصي</title>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+
+<style>
+body { background:#020617; color:white; font-family:tahoma; text-align:center; }
+#container { position:relative; width:640px; margin:auto; }
+video,canvas { position:absolute; width:640px; height:480px; border-radius:12px; }
+button,select { padding:8px 14px; font-size:1rem; margin:5px; }
+#panel { margin-top:500px; font-size:1.2rem; }
+#confidenceBar { width:300px; height:16px; background:#334155; margin:10px auto; border-radius:10px; }
+#confidenceFill { height:100%; width:0%; background:#22c55e; }
+</style>
+
+</head>
+<body>
+
+<h2>🕌 رصد الصلاة الذكي – تدريب شخصي</h2>
+<button id="btnStart">ابدأ الاستماع</button>
+<button id="btnTrainSujood">تدريب السجود</button>
+<button id="btnTrainJuloos">تدريب الجلوس</button>
+<div id="container">
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
+</div>
+<div id="panel">
+<div id="info">في الانتظار – قل: الله أكبر</div>
+<div id="confidenceBar"><div id="confidenceFill"></div></div>
+</div>
+
+<audio id="takbir" src="takbir.mp3"></audio> <audio id="qiyam" src="qiyam.mp3"></audio> <audio id="ruku" src="ruku.mp3"></audio> <audio id="sujood" src="sujood.mp3"></audio> <audio id="juloos" src="juloos.mp3"></audio> <audio id="tashahhud" src="tashahhud.mp3"></audio> <audio id="tasleem" src="tasleem.mp3"></audio>
+
+<script>
+const video=document.getElementById('video');
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+const info=document.getElementById('info');
+const confidenceFill=document.getElementById('confidenceFill');
+const sounds={takbir,qiyam,ruku,sujood,juloos,tashahhud,tasleem};
+let detector,prayerStarted=false,prayerFinished=false,lastPose='',lastTime=0;
+let sujoodCount=0,rakahCount=0,inSujood=false;
+let calibration={sujood:null,juloos:null};
+
+async function startCamera(){
+  const stream=await navigator.mediaDevices.getUserMedia({video:true});
+  video.srcObject=stream;
+  await video.play();
+  canvas.width=video.videoWidth;
+  canvas.height=video.videoHeight;
+  detector=await poseDetection.createDetector(poseDetection.SupportedModels.BlazePose,{runtime:'mediapipe',modelType:'lite',solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/pose'});
+}
+
+function bodyHeight(kp){const v=kp.filter(p=>p.score>0.5);if(v.length<5)return 0;const ys=v.map(p=>p.y);return Math.max(...ys)-Math.min(...ys);}
+function angle(a,b,c){const ab={x:a.x-b.x,y:a.y-b.y};const cb={x:c.x-b.x,y:c.y-b.y};const dot=ab.x*cb.x+ab.y*cb.y;const mag=Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y);return Math.acos(dot/mag)*180/Math.PI;}
+
+function drawSkeleton(kp){ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;const EDGES=[['right_shoulder','right_elbow'],['right_elbow','right_wrist'],['right_shoulder','right_hip'],['right_hip','right_knee'],['right_knee','right_ankle'],['right_shoulder','nose']];EDGES.forEach(([a,b])=>{const p1=kp.find(p=>p.name===a&&p.score>0.5);const p2=kp.find(p=>p.name===b&&p.score>0.5);if(p1&&p2){ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke();}});}
+
+function captureCalibration(poseName){
+  if(!detector) return;
+  detector.estimatePoses(video).then(poses=>{
+    if(poses.length){
+      const kp=poses[0].keypoints;
+      const h=bodyHeight(kp);
+      const knee=angle(kp.find(p=>p.name==='right_hip'),kp.find(p=>p.name==='right_knee'),kp.find(p=>p.name==='right_ankle'));
+      const trunk=angle(kp.find(p=>p.name==='right_shoulder'),kp.find(p=>p.name==='right_hip'),kp.find(p=>p.name==='right_knee'));
+      calibration[poseName]={height:h,knee:knee,trunk:trunk};
+      info.innerText=`تم تخزين معايرة ${poseName}`;
+      console.log('Calibration',poseName,calibration[poseName]);
+    }
+  });
+}
+
+function detectPose(kp){
+  if(!calibration.sujood || !calibration.juloos) return {pose:'unknown',conf:0.3};
+  const h=bodyHeight(kp);
+  const knee=angle(kp.find(p=>p.name==='right_hip'),kp.find(p=>p.name==='right_knee'),kp.find(p=>p.name==='right_ankle'));
+  const trunk=angle(kp.find(p=>p.name==='right_shoulder'),kp.find(p=>p.name==='right_hip'),kp.find(p=>p.name==='right_knee'));
+
+  // مقارنة بالمعايرة
+  const sujoodScore=1-Math.abs(h-calibration.sujood.height)/calibration.sujood.height;
+  const juloosScore=1-Math.abs(h-calibration.juloos.height)/calibration.juloos.height;
+  if(sujoodScore>0.85 && trunk<calibration.sujood.trunk+10) return {pose:'sujood',conf:sujoodScore};
+  if(juloosScore>0.85 && trunk>calibration.juloos.trunk-10) return {pose:'juloos',conf:juloosScore};
+
+  // باقي الوضعيات كما كانت
+  if(h>calibration.juloos.height*1.3) return {pose:'qiyam',conf:0.95};
+  if(h>calibration.juloos.height*1.1) return {pose:'ruku',conf:0.95};
+  return {pose:'unknown',conf:0.3};
+}
+
+async function loop(t){
+  if(!prayerStarted || prayerFinished){ requestAnimationFrame(loop); return; }
+  if(t-lastTime<120){ requestAnimationFrame(loop); return; }
+  lastTime=t;
+  const poses=await detector.estimatePoses(video);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(poses.length){
+    const kp=poses[0].keypoints;
+    drawSkeleton(kp);
+    const res=detectPose(kp);
+    confidenceFill.style.width=`${res.conf*100}%`;
+    info.innerText=`الوضعية: ${res.pose} | الركعات: ${rakahCount}`;
+    if(res.pose==='sujood'&&!inSujood){sujoodCount++;inSujood=true;if(sujoodCount===2){rakahCount++;sujoodCount=0;}}
+    if(res.pose!=='sujood') inSujood=false;
+    playSound(res.pose);
+  }
+  requestAnimationFrame(loop);
+}
+
+function startListening(){
+  const SpeechRecognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SpeechRecognition){ info.innerText='المتصفح لا يدعم التعرف الصوتي'; return; }
+  const rec=new SpeechRecognition();
+  rec.lang='ar-SA'; rec.continuous=true;
+  rec.onresult=e=>{
+    const text=e.results[e.results.length-1][0].transcript;
+    if(text.includes('الله')){ prayerStarted=true;sounds.takbir.play();info.innerText='بدأت الصلاة – يتم الرصد الآن'; requestAnimationFrame(loop); rec.stop(); }
+  };
+  rec.start();
+}
+
+document.getElementById('btnStart').addEventListener('click', async()=>{ await startCamera(); startListening();});
+document.getElementById('btnTrainSujood').addEventListener('click', ()=>captureCalibration('sujood'));
+document.getElementById('btnTrainJuloos').addEventListener('click', ()=>captureCalibration('juloos'));
+
+function playSound(p){ if(p!==lastPose && sounds[p] && prayerStarted && !prayerFinished){ sounds[p].currentTime=0; sounds[p].play(); lastPose=p; }}
+</script>
+
+</body>
+</html>
