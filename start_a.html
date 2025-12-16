@@ -1,0 +1,174 @@
+﻿<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>رصد الصلاة الذكي – بدء بالتكبير</title>
+
+  <!-- TensorFlow.js -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+
+  <style>
+    body { background:#020617; color:white; font-family:tahoma; text-align:center; }
+    #container { position:relative; width:640px; margin:auto; }
+    video,canvas { position:absolute; width:640px; height:480px; border-radius:12px; }
+    button,select { padding:8px 14px; font-size:1rem; margin:5px; }
+    #panel { margin-top:500px; font-size:1.2rem; }
+    #confidenceBar { width:300px; height:16px; background:#334155; margin:10px auto; border-radius:10px; }
+    #confidenceFill { height:100%; width:0%; background:#22c55e; }
+  </style>
+</head>
+<body>
+
+<h2>🕌 رصد الصلاة الذكي</h2>
+
+<select id="viewMode">
+  <option value="front">المصلي مقابل الكاميرا</option>
+  <option value="right">الكاميرا على يمين المصلي</option>
+</select>
+
+<button id="btnStart">ابدأ الاستماع</button>
+
+<div id="container">
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
+</div>
+
+<div id="panel">
+  <div id="info">في الانتظار – قل: الله أكبر</div>
+  <div id="confidenceBar"><div id="confidenceFill"></div></div>
+</div>
+
+<audio id="takbir" src="takbir.mp3"></audio>
+<audio id="qiyam" src="qiyam.mp3"></audio>
+<audio id="ruku" src="ruku.mp3"></audio>
+<audio id="sujood" src="sujood.mp3"></audio>
+<audio id="juloos" src="juloos.mp3"></audio>
+<audio id="tashahhud" src="tashahhud.mp3"></audio>
+<audio id="tasleem" src="tasleem.mp3"></audio>
+
+<script>
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const info = document.getElementById('info');
+const confidenceFill = document.getElementById('confidenceFill');
+const viewMode = document.getElementById('viewMode');
+
+let detector, lastPose = '', lastTime = 0;
+let sujoodCount = 0, rakahCount = 0, inSujood = false;
+let prayerStarted = false, prayerFinished = false;
+
+const sounds = { takbir, qiyam, ruku, sujood, juloos, tashahhud, tasleem };
+
+const EDGES = [
+ ['right_shoulder','right_elbow'], ['right_elbow','right_wrist'],
+ ['right_shoulder','right_hip'], ['right_hip','right_knee'], ['right_knee','right_ankle'],
+ ['right_shoulder','nose']
+];
+
+function playSound(p) {
+  if (p !== lastPose && sounds[p] && prayerStarted && !prayerFinished) {
+    sounds[p].currentTime = 0;
+    sounds[p].play();
+    lastPose = p;
+  }
+}
+
+function drawSkeleton(kp) {
+  ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2;
+  EDGES.forEach(([a,b]) => {
+    const p1 = kp.find(p => p.name===a && p.score>0.5);
+    const p2 = kp.find(p => p.name===b && p.score>0.5);
+    if(p1 && p2){ ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
+  });
+}
+
+function detectPose(kp) {
+  const g = n => kp.find(p => p.name===n && p.score>0.5);
+  const hip = g('right_hip'), knee = g('right_knee'), shoulder = g('right_shoulder'), nose = g('nose');
+  if(!hip||!knee||!shoulder||!nose) return {pose:'unknown',conf:0};
+
+  const torso = Math.abs(shoulder.y - hip.y);
+  const headDrop = hip.y - nose.y;
+  const kneeDrop = knee.y - hip.y;
+
+  if(viewMode.value==='right'){
+    if(headDrop < -40 && torso > 120) return {pose:'sujood',conf:1.0};
+    if(torso < 60 && headDrop > 20 && headDrop < 80) return {pose:'ruku',conf:0.9};
+    if(kneeDrop > 40 && torso > 90 && torso < 130) return {pose:'tashahhud',conf:0.85};
+    if(kneeDrop > 30) return {pose:'juloos',conf:0.8};
+    if(torso < 25 && Math.abs(headDrop) < 20) return {pose:'qiyam',conf:0.9};
+  } else {
+    if(kneeDrop < -40 && headDrop < 60) return {pose:'sujood',conf:1.0};
+    if(torso < 60) return {pose:'ruku',conf:0.9};
+    if(kneeDrop > 30) return {pose:'juloos',conf:0.8};
+    return {pose:'qiyam',conf:0.9};
+  }
+  return {pose:'unknown',conf:0.3};
+}
+
+async function startCamera(){
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  video.srcObject = stream;
+  await video.play();
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+
+  detector = await poseDetection.createDetector(
+    poseDetection.SupportedModels.BlazePose,
+    { runtime:'mediapipe', modelType:'lite', solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/pose' }
+  );
+}
+
+function startListening(){
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SpeechRecognition){ info.innerText='المتصفح لا يدعم التعرف الصوتي'; return; }
+  const rec = new SpeechRecognition();
+  rec.lang = 'ar-SA'; rec.continuous = true;
+  rec.onresult = e => {
+    const text = e.results[e.results.length-1][0].transcript;
+    if(text.includes('الله')){
+      prayerStarted = true;
+      sounds.takbir.play();
+      info.innerText = 'بدأت الصلاة – يتم الرصد الآن';
+      requestAnimationFrame(loop);
+      rec.stop();
+    }
+  };
+  rec.start();
+}
+
+async function loop(t){
+  if(!prayerStarted || prayerFinished){ requestAnimationFrame(loop); return; }
+  if(t-lastTime<120){ requestAnimationFrame(loop); return; }
+  lastTime=t;
+
+  const poses = await detector.estimatePoses(video);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if(poses.length){
+    const kp = poses[0].keypoints;
+    drawSkeleton(kp);
+    const res = detectPose(kp);
+
+    if(res.pose==='sujood'&&!inSujood){ sujoodCount++; inSujood=true; if(sujoodCount===2){ rakahCount++; sujoodCount=0; } }
+    if(res.pose!=='sujood') inSujood=false;
+    if(res.pose==='tasleem' && rakahCount>0) prayerFinished=true;
+
+    confidenceFill.style.width = `${res.conf*100}%`;
+    playSound(res.pose);
+    info.innerText = `الوضعية: ${res.pose} | الركعات: ${rakahCount}`;
+  }
+  requestAnimationFrame(loop);
+}
+
+document.getElementById('btnStart').addEventListener('click', async () => {
+  await startCamera();
+  startListening();
+});
+</script>
+</body>
+</html>
