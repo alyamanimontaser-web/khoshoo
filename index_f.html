@@ -1,0 +1,178 @@
+﻿<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8" />
+  <title>رصد الصلاة – دعم الكاميرا الأمامية والجانبية</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.12.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.12.0"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
+
+  <style>
+    body { background:#020617; color:white; font-family:tahoma; text-align:center; }
+    #container { position:relative; width:640px; margin:auto; }
+    video,canvas { position:absolute; width:640px; height:480px; border-radius:12px; }
+    button,select { padding:8px 14px; font-size:1rem; margin:5px; }
+    #panel { margin-top:500px; font-size:1.2rem; }
+    #confidenceBar { width:300px; height:16px; background:#334155; margin:10px auto; border-radius:10px; }
+    #confidenceFill { height:100%; width:0%; background:#22c55e; }
+  </style>
+</head>
+<body>
+
+<h2>🕌 رصد الصلاة (أمامي / جانبي)</h2>
+<button onclick="startApp()">ابدأ</button>
+<select id="viewMode">
+  <option value="front">كاميرا أمامية</option>
+  <option value="side">كاميرا جانبية</option>
+</select>
+
+<div id="container">
+  <video id="video" autoplay playsinline></video>
+  <canvas id="canvas"></canvas>
+</div>
+
+<div id="panel">
+  <div id="info">في الانتظار...</div>
+  <div id="confidenceBar"><div id="confidenceFill"></div></div>
+</div>
+
+<audio id="qiyam" src="qiyam.mp3"></audio>
+<audio id="ruku" src="ruku.mp3"></audio>
+<audio id="sujood" src="sujood.mp3"></audio>
+<audio id="juloos" src="juloos.mp3"></audio>
+
+<script>
+const video=document.getElementById('video');
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+const info=document.getElementById('info');
+const confidenceFill=document.getElementById('confidenceFill');
+const viewMode=document.getElementById('viewMode');
+
+let detector,lastPose='',lastTime=0;
+let sujoodCount=0, rakahCount=0;
+let inSujood=false, prayerFinished=false;
+const sounds={qiyam,ruku,sujood,juloos};
+
+const EDGES=[
+ ['right_shoulder','right_elbow'],['right_elbow','right_wrist'],
+ ['right_shoulder','right_hip'],['right_hip','right_knee'],['right_knee','right_ankle'],
+ ['right_shoulder','nose']
+];
+
+function angle(a,b,c){const ab={x:a.x-b.x,y:a.y-b.y};const cb={x:c.x-b.x,y:c.y-b.y};return Math.acos((ab.x*cb.x+ab.y*cb.y)/(Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y)))*180/Math.PI;}
+
+function playSound(p){
+  if(p!==lastPose && sounds[p] && !prayerFinished){
+    sounds[p].currentTime=0;
+    sounds[p].play();
+    lastPose=p;
+  }
+}}
+
+function detectFront(kp){
+  const g=n=>kp.find(p=>p.name===n&&p.score>0.5);
+  const hip=g('right_hip'),knee=g('right_knee'),ankle=g('right_ankle'),shoulder=g('right_shoulder'),nose=g('nose');
+  if(!hip||!knee||!ankle||!shoulder||!nose) return {pose:'unknown',conf:0};
+  const kneeA=angle(hip,knee,ankle);
+  const torsoA=angle(hip,shoulder,{x:shoulder.x,y:shoulder.y-100});
+  const head=Math.abs(nose.y-hip.y);
+  if(kneeA>165&&torsoA>155) return {pose:'qiyam',conf:0.9};
+  if(kneeA>165&&torsoA<125) return {pose:'ruku',conf:0.9};
+  if(kneeA<95&&head<60) return {pose:'sujood',conf:1.0};
+  if(kneeA<125&&torsoA>145) return {pose:'juloos',conf:0.8};
+  return {pose:'unknown',conf:0.3};
+}
+
+function detectSide(kp){
+  // كشف جانبي مُحسّن (ركوع، سجود، جلوس، تشهد، تسليم)
+  const g=n=>kp.find(p=>p.name===n&&p.score>0.5);
+  const hip=g('right_hip'), knee=g('right_knee'), ankle=g('right_ankle');
+  const shoulder=g('right_shoulder'), nose=g('nose'), ear=g('right_ear');
+  if(!hip||!knee||!shoulder||!nose) return {pose:'unknown',conf:0};
+
+  const torsoY = Math.abs(shoulder.y - hip.y);      // طول الجذع عموديًا
+  const headDrop = hip.y - nose.y;                  // انخفاض الرأس
+  const kneeDrop = knee.y - hip.y;                  // وضع الركبة
+  const headSide = ear ? Math.abs(ear.x - nose.x) : 0; // حركة الرأس (للتسليم)
+
+  // سجود: الرأس أسفل الركبة + الجذع مائل
+  if(headDrop < -40 && torsoY > 120) {
+    return {pose:'sujood', conf:1.0};
+  }
+
+  // ركوع: الجذع شبه أفقي والرأس بمحاذاة الجذع
+  if(torsoY < 60 && headDrop > 20 && headDrop < 80) {
+    return {pose:'ruku', conf:0.9};
+  }
+
+  // تشهد: جلوس ثابت + جذع مستقيم
+  if(kneeDrop > 40 && torsoY > 90 && torsoY < 130) {
+    return {pose:'tashahhud', conf:0.85};
+  }
+
+  // جلوس عادي
+  if(kneeDrop > 30) {
+    return {pose:'juloos', conf:0.8};
+  }
+
+  // تسليم: بعد التشهد مع حركة رأس جانبية
+  if(headSide > 15 && kneeDrop > 40) {
+    return {pose:'tasleem', conf:0.9};
+  }
+
+  // قيام
+  if(torsoY < 25 && Math.abs(headDrop) < 20) {
+    return {pose:'qiyam', conf:0.9};
+  }
+
+  return {pose:'unknown', conf:0.3};
+}
+
+function drawSkeleton(kp){ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;EDGES.forEach(([a,b])=>{const p1=kp.find(p=>p.name===a&&p.score>0.5);const p2=kp.find(p=>p.name===b&&p.score>0.5);if(p1&&p2){ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke();}});}
+
+async function startApp(){
+  const stream=await navigator.mediaDevices.getUserMedia({video:true});
+  video.srcObject=stream;
+  await new Promise(r=>video.onloadedmetadata=r);
+  canvas.width=video.videoWidth;canvas.height=video.videoHeight;
+  detector=await poseDetection.createDetector(poseDetection.SupportedModels.BlazePose,{runtime:'mediapipe',modelType:'lite',solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/pose'});
+  info.innerText='تم التشغيل';
+  requestAnimationFrame(loop);
+}
+
+async function loop(t){
+  if(t-lastTime<120){requestAnimationFrame(loop);return;} lastTime=t;
+  const poses=await detector.estimatePoses(video);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(poses.length){
+    const kp=poses[0].keypoints;
+    drawSkeleton(kp);
+    const res=viewMode.value==='side'?detectSide(kp):detectFront(kp);
+    confidenceFill.style.width=`${res.conf*100}%`;
+    playSound(res.pose);
+    // عدّ السجود والركعات
+if(res.pose==='sujood' && !inSujood){
+  sujoodCount++;
+  inSujood=true;
+  if(sujoodCount===2){
+    rakahCount++;
+    sujoodCount=0;
+  }
+}
+if(res.pose!=='sujood') inSujood=false;
+
+// إنهاء الصلاة عند التسليم بعد التشهد
+if(res.pose==='tasleem' && rakahCount>0){
+  prayerFinished=true;
+}
+
+info.innerText=`الوضعية: ${res.pose} | الركعات: ${rakahCount} | الوضع: ${viewMode.value==='side'?'جانبي':'أمامي'}`;
+  }
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>
