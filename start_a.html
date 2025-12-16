@@ -3,10 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <title>تطبيق رصد وضعيات الصلاة</title>
+<!-- نسخ حديثة متوافقة من TensorFlow.js و Pose Detection -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.12.0"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@4.12.0"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.12.0"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@0.0.8/dist/pose-detection.min.js"></script>
 <style>
   video { transform: scaleX(-1); width: 640px; height: 480px; }
   canvas { position: absolute; left: 0; top: 0; }
@@ -31,16 +32,13 @@ let maxHeight = 0;
 let stablePose='', stableSince=0;
 
 async function startApp(){
-  // ضبط TensorFlow.js للعمل على CPU لتجنب مشاكل WebGL/WASM
   await tf.setBackend('cpu');
   await tf.ready();
 
-  // بدء الكاميرا
   navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
     video.srcObject = stream;
   });
 
-  // إنشاء detector BlazePose
   detector = await poseDetection.createDetector(
     poseDetection.SupportedModels.BlazePose,
     { runtime: 'mediapipe', modelType: 'lite', solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose' }
@@ -75,13 +73,9 @@ function detectPose(kp){
   const ratio = h/maxHeight;
   const kneeAngle = angle(hip,knee,ankle);
 
-  // سجود
   if(ratio<0.45){ return {pose:'sujood',conf:1.0}; }
-  // جلوس
   if(ratio>=0.45 && ratio<0.65 && kneeAngle<130){ return {pose:'juloos',conf:0.9}; }
-  // ركوع
   if(ratio>=0.65 && ratio<0.85){ return {pose:'ruku',conf:0.95}; }
-  // قيام
   if(ratio>=0.85 && kneeAngle>160){ return {pose:'qiyam',conf:0.95}; }
   return {pose:'unknown',conf:0.3};
 }
@@ -91,7 +85,6 @@ async function detectLoop(){
   const poses = await detector.estimatePoses(video);
   if(poses.length>0){
     const rawPose = detectPose(poses[0].keypoints);
-    // شرط الثبات الزمني
     let res;
     if(rawPose.pose===stablePose){
       if(performance.now()-stableSince>400){ res=rawPose; } else { res={pose:stablePose,conf:rawPose.conf}; }
@@ -100,7 +93,6 @@ async function detectLoop(){
       stableSince=performance.now();
       res={pose:'unknown',conf:rawPose.conf};
     }
-    // تشغيل الصوت المناسب
     if(res.pose==='takbir'){ document.getElementById('takbir').play(); }
     if(res.pose==='qiyam'){ document.getElementById('qiyam').play(); }
     if(res.pose==='ruku'){ document.getElementById('ruku').play(); }
