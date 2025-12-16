@@ -60,7 +60,7 @@ document.getElementById('startBtn').onclick = startApp;
 async function startApp() {
   statusEl.textContent = 'تشغيل الكاميرا…';
 
-  await tf.setBackend('cpu');
+  
   await tf.ready();
 
   const stream = await navigator.mediaDevices.getUserMedia({ video: true });
