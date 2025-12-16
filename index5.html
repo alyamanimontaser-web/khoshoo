@@ -61,7 +61,6 @@ async function startApp() {
   statusEl.textContent = 'تشغيل الكاميرا…';
 
   
-  await tf.ready();
 
   const stream = await navigator.mediaDevices.getUserMedia({ video: true });
   video.srcObject = stream;
