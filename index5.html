@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+<meta charset="UTF-8">
+<title>تطبيق رصد وضعيات الصلاة</title>
+<!-- نسخ حديثة متوافقة من TensorFlow.js و Pose Detection -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.12.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-cpu@4.12.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.12.0"></script>
+<script src="https://unpkg.com/@tensorflow-models/pose-detection@0.0.8/dist/pose-detection.min.js"></script>
+<style>
+  video { transform: scaleX(-1); width: 640px; height: 480px; }
+  canvas { position: absolute; left: 0; top: 0; }
+</style>
+</head>
+<body>
+<h1>تطبيق رصد وضعيات الصلاة</h1>
+<button onclick="startApp()">ابدأ</button>
+<video id="webcam" autoplay playsinline></video>
+<canvas id="overlay"></canvas>
+<audio id="takbir" src="takbir.mp3"></audio>
+<audio id="qiyam" src="qiyam.mp3"></audio>
+<audio id="ruku" src="ruku.mp3"></audio>
+<audio id="sujood" src="sujood.mp3"></audio>
+<audio id="juloos" src="juloos.mp3"></audio>
+<audio id="tashahhud" src="tashahhud.mp3"></audio>
+<audio id="tasleem" src="tasleem.mp3"></audio>
+<script>
+let detector;
+let video = document.getElementById('webcam');
+let maxHeight = 0;
+let stablePose='', stableSince=0;
+
+async function startApp(){
+  await tf.setBackend('cpu');
+  await tf.ready();
+
+  navigator.mediaDevices.getUserMedia({ video: true }).then(stream => {
+    video.srcObject = stream;
+  });
+
+  detector = await poseDetection.createDetector(
+    poseDetection.SupportedModels.BlazePose,
+    { runtime: 'mediapipe', modelType: 'lite', solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose' }
+  );
+
+  requestAnimationFrame(detectLoop);
+}
+
+function bodyHeight(keypoints){
+  const valid = keypoints.filter(p => p.score>0.5);
+  if(valid.length<5) return 0;
+  const ys = valid.map(p=>p.y);
+  return Math.max(...ys)-Math.min(...ys);
+}
+
+function angle(a,b,c){
+  const ab={x:a.x-b.x,y:a.y-b.y};
+  const cb={x:c.x-b.x,y:c.y-b.y};
+  const dot=ab.x*cb.x+ab.y*cb.y;
+  const mag=Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y);
+  return Math.acos(dot/mag)*180/Math.PI;
+}
+
+function detectPose(kp){
+  const g=n=>kp.find(p=>p.name===n&&p.score>0.5);
+  const hip=g('right_hip'), knee=g('right_knee'), ankle=g('right_ankle'), shoulder=g('right_shoulder');
+  if(!hip||!knee||!ankle||!shoulder) return {pose:'unknown',conf:0};
+
+  const h = bodyHeight(kp);
+  if(h>maxHeight) maxHeight=h;
+  if(!maxHeight) return {pose:'unknown',conf:0};
+  const ratio = h/maxHeight;
+  const kneeAngle = angle(hip,knee,ankle);
+
+  if(ratio<0.45){ return {pose:'sujood',conf:1.0}; }
+  if(ratio>=0.45 && ratio<0.65 && kneeAngle<130){ return {pose:'juloos',conf:0.9}; }
+  if(ratio>=0.65 && ratio<0.85){ return {pose:'ruku',conf:0.95}; }
+  if(ratio>=0.85 && kneeAngle>160){ return {pose:'qiyam',conf:0.95}; }
+  return {pose:'unknown',conf:0.3};
+}
+
+async function detectLoop(){
+  if(!detector) return;
+  const poses = await detector.estimatePoses(video);
+  if(poses.length>0){
+    const rawPose = detectPose(poses[0].keypoints);
+    let res;
+    if(rawPose.pose===stablePose){
+      if(performance.now()-stableSince>400){ res=rawPose; } else { res={pose:stablePose,conf:rawPose.conf}; }
+    } else {
+      stablePose=rawPose.pose;
+      stableSince=performance.now();
+      res={pose:'unknown',conf:rawPose.conf};
+    }
+    if(res.pose==='takbir'){ document.getElementById('takbir').play(); }
+    if(res.pose==='qiyam'){ document.getElementById('qiyam').play(); }
+    if(res.pose==='ruku'){ document.getElementById('ruku').play(); }
+    if(res.pose==='sujood'){ document.getElementById('sujood').play(); }
+    if(res.pose==='juloos'){ document.getElementById('juloos').play(); }
+  }
+  requestAnimationFrame(detectLoop);
+}
+</script>
+</body>
+</html>
