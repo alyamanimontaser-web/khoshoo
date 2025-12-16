@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ar">
 <head>
   <meta charset="UTF-8">
@@ -58,6 +58,7 @@ const confidenceFill = document.getElementById('confidenceFill');
 const viewMode = document.getElementById('viewMode');
 
 let detector, lastPose = '', lastTime = 0;
+let stablePose='', stableSince=0;
 let sujoodCount = 0, rakahCount = 0, inSujood = false;
 let prayerStarted = false, prayerFinished = false;
 
@@ -86,27 +87,38 @@ function drawSkeleton(kp) {
   });
 }
 
-function detectPose(kp) {
-  const g = n => kp.find(p => p.name===n && p.score>0.5);
-  const hip = g('right_hip'), knee = g('right_knee'), shoulder = g('right_shoulder'), nose = g('nose');
-  if(!hip||!knee||!shoulder||!nose) return {pose:'unknown',conf:0};
+// حساب الزاوية بين ثلاث نقاط
+function angle(a,b,c){
+  const ab={x:a.x-b.x,y:a.y-b.y};
+  const cb={x:c.x-b.x,y:c.y-b.y};
+  const dot=ab.x*cb.x+ab.y*cb.y;
+  const mag=Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y);
+  return Math.acos(dot/mag)*180/Math.PI;
+}
 
-  const torso = Math.abs(shoulder.y - hip.y);
-  const headDrop = hip.y - nose.y;
-  const kneeDrop = knee.y - hip.y;
+// كشف الوضعية بدقة أعلى (حل الخربطة)
+function detectPose(kp){
+  const g=n=>kp.find(p=>p.name===n&&p.score>0.5);
+  const hip=g('right_hip'), knee=g('right_knee'), ankle=g('right_ankle');
+  const shoulder=g('right_shoulder'), nose=g('nose');
+  if(!hip||!knee||!ankle||!shoulder||!nose) return {pose:'unknown',conf:0};
 
-  if(viewMode.value==='right'){
-    if(headDrop < -40 && torso > 120) return {pose:'sujood',conf:1.0};
-    if(torso < 60 && headDrop > 20 && headDrop < 80) return {pose:'ruku',conf:0.9};
-    if(kneeDrop > 40 && torso > 90 && torso < 130) return {pose:'tashahhud',conf:0.85};
-    if(kneeDrop > 30) return {pose:'juloos',conf:0.8};
-    if(torso < 25 && Math.abs(headDrop) < 20) return {pose:'qiyam',conf:0.9};
-  } else {
-    if(kneeDrop < -40 && headDrop < 60) return {pose:'sujood',conf:1.0};
-    if(torso < 60) return {pose:'ruku',conf:0.9};
-    if(kneeDrop > 30) return {pose:'juloos',conf:0.8};
-    return {pose:'qiyam',conf:0.9};
-  }
+  const torso=Math.abs(shoulder.y-hip.y);
+  const headDrop=hip.y-nose.y;
+  const kneeAngle=angle(hip,knee,ankle);
+
+  // ســــجــــود
+  if(headDrop<-40 && torso>120) return {pose:'sujood',conf:1.0};
+
+  // ركــــوع
+  if(torso<60) return {pose:'ruku',conf:0.95};
+
+  // قــــيــــام
+  if(kneeAngle>160 && torso>80) return {pose:'qiyam',conf:0.9};
+
+  // جلــــوس / تشهد
+  if(kneeAngle>80 && kneeAngle<130) return {pose:'juloos',conf:0.85};
+
   return {pose:'unknown',conf:0.3};
 }
 
@@ -152,7 +164,20 @@ async function loop(t){
   if(poses.length){
     const kp = poses[0].keypoints;
     drawSkeleton(kp);
-    const res = detectPose(kp);
+    const raw = detectPose(kp);
+
+// شرط الثبات الزمني لمنع الخربطة
+if(raw.pose===stablePose){
+  if(performance.now()-stableSince>400){
+    res=raw;
+  } else {
+    res={pose:lastPose,conf:raw.conf};
+  }
+} else {
+  stablePose=raw.pose;
+  stableSince=performance.now();
+  res={pose:lastPose,conf:raw.conf};
+}
 
     if(res.pose==='sujood'&&!inSujood){ sujoodCount++; inSujood=true; if(sujoodCount===2){ rakahCount++; sujoodCount=0; } }
     if(res.pose!=='sujood') inSujood=false;
