@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>نظام ذكي لرصد الصلاة وعدّ الركعات</title>
+  <title>نظام ذكي متقدم لرصد الصلاة</title>
 
-  <!-- TensorFlow.js (مطلوب لـ GitHub Pages) -->
+  <!-- TensorFlow.js -->
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core@4.12.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter@4.12.0"></script>
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl@4.12.0"></script>
@@ -15,49 +15,21 @@
   <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
 
   <style>
-    body {
-      margin: 0;
-      font-family: Tahoma, Arial;
-      background: #0f172a;
-      color: white;
-      text-align: center;
-    }
-    h2 { margin-top: 10px; }
-    button {
-      padding: 10px 25px;
-      font-size: 1.1rem;
-      border-radius: 12px;
-      border: none;
-      cursor: pointer;
-    }
-    #container {
-      position: relative;
-      width: 640px;
-      margin: auto;
-    }
-    video {
-      width: 640px;
-      height: 480px;
-      border-radius: 12px;
-      position: absolute;
-      z-index: 1;
-    }
-    canvas {
-      width: 640px;
-      height: 480px;
-      border-radius: 12px;
-      position: absolute;
-      z-index: 2;
-    }
-    #info {
-      margin-top: 500px;
-      font-size: 1.3rem;
-    }
+    body { margin:0; font-family:Tahoma; background:#020617; color:white; text-align:center; }
+    h2 { margin:10px; }
+    #container { position:relative; width:640px; margin:auto; }
+    video, canvas { width:640px; height:480px; position:absolute; border-radius:12px; }
+    video { z-index:1; }
+    canvas { z-index:2; }
+    button { padding:10px 20px; font-size:1rem; border-radius:10px; border:none; cursor:pointer; }
+    #panel { margin-top:500px; font-size:1.2rem; }
+    #confidenceBar { width:300px; height:18px; background:#334155; margin:10px auto; border-radius:10px; overflow:hidden; }
+    #confidenceFill { height:100%; width:0%; background:#22c55e; }
   </style>
 </head>
 <body>
 
-<h2>🕌 نظام ذكي لرصد حركات الصلاة</h2>
+<h2>🕌 نظام ذكي متقدم لرصد الصلاة</h2>
 <button onclick="startApp()">ابدأ</button>
 
 <div id="container">
@@ -65,134 +37,109 @@
   <canvas id="canvas"></canvas>
 </div>
 
-<div id="info">في الانتظار...</div>
+<div id="panel">
+  <div id="info">في الانتظار...</div>
+  <div id="confidenceBar"><div id="confidenceFill"></div></div>
+</div>
 
-<!-- الأصوات (يجب أن تكون في نفس المجلد) -->
 <audio id="qiyam" src="qiyam.mp3"></audio>
 <audio id="ruku" src="ruku.mp3"></audio>
 <audio id="sujood" src="sujood.mp3"></audio>
 <audio id="juloos" src="juloos.mp3"></audio>
+<audio id="tashahhud" src="tashahhud.mp3"></audio>
+<audio id="tasleem" src="tasleem.mp3"></audio>
 
 <script>
 const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const info = document.getElementById('info');
+const confidenceFill = document.getElementById('confidenceFill');
 
-let detector = null;
-let lastPose = '';
-let sujoodCount = 0;
-let rakahCount = 0;
-let inSujood = false;
+let detector, lastPose='', inSujood=false;
+let sujoodCount=0, rakahCount=0;
+let poseHistory=[], lastAnalysisTime=0;
 
-const sounds = {
-  qiyam: document.getElementById('qiyam'),
-  ruku: document.getElementById('ruku'),
-  sujood: document.getElementById('sujood'),
-  juloos: document.getElementById('juloos')
+const sounds={
+  qiyam, ruku, sujood, juloos,
+  tashahhud, tasleem
 };
 
-function playSound(name) {
-  if (name !== lastPose && sounds[name]) {
-    sounds[name].currentTime = 0;
-    sounds[name].play();
-    lastPose = name;
-  }
+const EDGES=[
+ ['right_shoulder','right_elbow'],['right_elbow','right_wrist'],
+ ['right_hip','right_knee'],['right_knee','right_ankle'],
+ ['right_shoulder','right_hip'],['right_shoulder','nose']
+];
+
+function playSound(p){ if(p!==lastPose && sounds[p]){ sounds[p].currentTime=0; sounds[p].play(); lastPose=p; }}
+
+function angle(a,b,c){ const ab={x:a.x-b.x,y:a.y-b.y}; const cb={x:c.x-b.x,y:c.y-b.y}; return Math.acos((ab.x*cb.x+ab.y*cb.y)/(Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y)))*180/Math.PI; }
+
+function detectPose(kp){
+  const g=n=>kp.find(p=>p.name===n && p.score>0.5);
+  const hip=g('right_hip'), knee=g('right_knee'), ankle=g('right_ankle'), shoulder=g('right_shoulder'), nose=g('nose');
+  if(!hip||!knee||!ankle||!shoulder||!nose) return {pose:'unknown', conf:0};
+
+  const kneeA=angle(hip,knee,ankle);
+  const torsoA=angle(hip,shoulder,{x:shoulder.x,y:shoulder.y-100});
+  const head=Math.abs(nose.y-hip.y);
+
+  if(kneeA>165 && torsoA>155) return {pose:'qiyam', conf:0.9};
+  if(kneeA>165 && torsoA<125) return {pose:'ruku', conf:0.9};
+  if(kneeA<95 && head<60) return {pose:'sujood', conf:1.0};
+  if(kneeA<125 && torsoA>145) return {pose:'juloos', conf:0.8};
+  if(kneeA<125 && torsoA>160) return {pose:'tashahhud', conf:0.8};
+  return {pose:'unknown', conf:0.3};
 }
 
-function angle(a, b, c) {
-  const ab = { x: a.x - b.x, y: a.y - b.y };
-  const cb = { x: c.x - b.x, y: c.y - b.y };
-  const dot = ab.x * cb.x + ab.y * cb.y;
-  const mag = Math.hypot(ab.x, ab.y) * Math.hypot(cb.x, cb.y);
-  return Math.acos(dot / mag) * 180 / Math.PI;
+function drawSkeleton(kp){
+  ctx.strokeStyle='#38bdf8'; ctx.lineWidth=2;
+  EDGES.forEach(([a,b])=>{
+    const p1=kp.find(p=>p.name===a&&p.score>0.5);
+    const p2=kp.find(p=>p.name===b&&p.score>0.5);
+    if(p1&&p2){ ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
+  });
 }
 
-function detectPrayerPose(keypoints) {
-  const get = n => keypoints.find(k => k.name === n && k.score > 0.5);
+async function startApp(){
+  const stream=await navigator.mediaDevices.getUserMedia({video:true});
+  video.srcObject=stream;
+  await new Promise(r=>video.onloadedmetadata=r);
+  canvas.width=video.videoWidth; canvas.height=video.videoHeight;
 
-  // الكاميرا الأمامية – الجانب الأيمن
-  const hip = get('right_hip');
-  const knee = get('right_knee');
-  const ankle = get('right_ankle');
-  const shoulder = get('right_shoulder');
-  const nose = get('nose');
-
-  if (!hip || !knee || !ankle || !shoulder || !nose) return 'unknown';
-
-  const kneeAngle = angle(hip, knee, ankle);
-  const torsoAngle = angle(hip, shoulder, { x: shoulder.x, y: shoulder.y - 100 });
-  const headDist = Math.abs(nose.y - hip.y);
-
-  if (kneeAngle > 165 && torsoAngle > 155) return 'qiyam';
-  if (kneeAngle > 165 && torsoAngle < 125) return 'ruku';
-  if (kneeAngle < 95 && headDist < 60) return 'sujood';
-  if (kneeAngle < 125 && torsoAngle > 145) return 'juloos';
-
-  return 'unknown';
-}
-
-async function startApp() {
-  // الكاميرا
-  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-  video.srcObject = stream;
-
-  await new Promise(resolve => video.onloadedmetadata = resolve);
-
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-
-  // تحميل النموذج (إجباري لـ GitHub Pages)
-  detector = await poseDetection.createDetector(
+  detector=await poseDetection.createDetector(
     poseDetection.SupportedModels.BlazePose,
-    {
-      runtime: 'mediapipe',
-      modelType: 'full',
-      solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose'
-    }
+    { runtime:'mediapipe', modelType:'lite', solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/pose' }
   );
-
-  info.innerText = 'تم التشغيل – يتم الرصد الآن';
+  info.innerText='تم التشغيل – يتم الرصد الآن';
   requestAnimationFrame(loop);
 }
 
-async function loop() {
-  const poses = await detector.estimatePoses(video);
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+async function loop(t){
+  if(t-lastAnalysisTime<120){ requestAnimationFrame(loop); return; }
+  lastAnalysisTime=t;
 
-  if (poses.length > 0) {
-    const keypoints = poses[0].keypoints;
+  const poses=await detector.estimatePoses(video);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
-    // رسم النقاط
-    keypoints.forEach(k => {
-      if (k.score > 0.5) {
-        ctx.beginPath();
-        ctx.arc(k.x, k.y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#22c55e';
-        ctx.fill();
-      }
-    });
+  if(poses.length){
+    const kp=poses[0].keypoints;
+    drawSkeleton(kp);
 
-    const pose = detectPrayerPose(keypoints);
-    playSound(pose);
+    const {pose, conf}=detectPose(kp);
+    poseHistory.push(pose); if(poseHistory.length>5) poseHistory.shift();
+    const stable=poseHistory.every(p=>p===pose)?pose:'unknown';
 
-    // عدّ السجود والركعات
-    if (pose === 'sujood' && !inSujood) {
-      sujoodCount++;
-      inSujood = true;
-      if (sujoodCount === 2) {
-        rakahCount++;
-        sujoodCount = 0;
-      }
-    }
-    if (pose !== 'sujood') inSujood = false;
+    confidenceFill.style.width=`${Math.round(conf*100)}%`;
+    playSound(stable);
 
-    info.innerText = `الوضعية: ${pose} | الركعات: ${rakahCount}`;
+    if(stable==='sujood'&&!inSujood){ sujoodCount++; inSujood=true; if(sujoodCount===2){ rakahCount++; sujoodCount=0; }}
+    if(stable!=='sujood') inSujood=false;
+
+    info.innerText=`الوضعية: ${stable} | الركعات: ${rakahCount}`;
   }
-
   requestAnimationFrame(loop);
 }
 </script>
-
 </body>
 </html>
