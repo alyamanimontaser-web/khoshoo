@@ -112,8 +112,8 @@ function detectPose(kp){
   const ratio = h / maxHeight;
 
   if(ratio < 0.40)  return { pose:'sujood', conf:1.0 };
-  if(ratio < 0.60)  return { pose:'juloos', conf:0.9 };
-  if(ratio < 0.80)  return { pose:'ruku', conf:0.95 };
+  if(ratio < 0.58)  return { pose:'juloos', conf:0.9 };
+  if(ratio < 0.85)  return { pose:'ruku', conf:0.95 };
   return { pose:'qiyam', conf:0.95 };
 }
 
@@ -205,5 +205,6 @@ document.getElementById('btnStart').addEventListener('click', async () => {
 </script>
 </body>
 </html>
+
 
 
