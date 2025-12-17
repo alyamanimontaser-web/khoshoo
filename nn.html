@@ -108,7 +108,7 @@ function detectPose(kp){
   const kneeAngle=angle(hip,knee,ankle);
 
   // ســــجــــود
-  if(headDrop<-40 && torso>20) return {pose:'sujood',conf:1.0};
+  if(headDrop<-40 && torso<30) return {pose:'sujood',conf:1.0};
 
   // ركــــوع
   if(torso<60) return {pose:'ruku',conf:0.95};
