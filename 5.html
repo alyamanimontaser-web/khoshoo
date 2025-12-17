@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ar">
 <head>
   <meta charset="UTF-8">
@@ -111,9 +111,9 @@ function detectPose(kp){
   if(h > maxHeight) maxHeight = h;
   const ratio = h / maxHeight;
 
-  if(ratio < 0.45)  return { pose:'sujood', conf:1.0 };
-  if(ratio < 0.65)  return { pose:'juloos', conf:0.9 };
-  if(ratio < 0.85)  return { pose:'ruku', conf:0.95 };
+  if(ratio < 0.33)  return { pose:'sujood', conf:1.0 };
+  if(ratio < 0.40)  return { pose:'juloos', conf:0.9 };
+  if(ratio < 0.65)  return { pose:'ruku', conf:0.95 };
   return { pose:'qiyam', conf:0.95 };
 }
 
