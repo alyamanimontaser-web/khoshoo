@@ -56,7 +56,23 @@ const ctx = canvas.getContext('2d');
 const info = document.getElementById('info');
 const confidenceFill = document.getElementById('confidenceFill');
 const viewMode = document.getElementById('viewMode');
+/* =========================
+   ضع كود المعايرة هنا ⬇️
+========================= */
 
+const CALIBRATION = {
+  camera: 'front',
+  sujood: {
+    bodyHeight: 134.56,
+    kneeAngle: 37.09,
+    trunkAngle: 3.65
+  },
+  juloos: {
+    bodyHeight: 206.24,
+    kneeAngle: 168.42,
+    trunkAngle: 169.31
+  }
+};
 let detector, lastPose = '', lastTime = 0;
 let stablePose='', stableSince=0;
 let sujoodCount = 0, rakahCount = 0, inSujood = false;
@@ -95,29 +111,6 @@ function angle(a,b,c){
   const mag=Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y);
   return Math.acos(dot/mag)*180/Math.PI;
 }
-<script>
-// ==== معايرة ثابتة (من calibration.json) ====
-const CALIBRATION = {
-  camera: 'front',
-  sujood: {
-    bodyHeight: 134.56,
-    kneeAngle: 37.09,
-    trunkAngle: 3.65
-  },
-  juloos: {
-    bodyHeight: 206.24,
-    kneeAngle: 168.42,
-    trunkAngle: 169.31
-  }
-};
-
-// حساب ارتفاع الجسم
-function bodyHeight(kp){
-  const valid = kp.filter(p => p.score > 0.5);
-  const ys = valid.map(p => p.y);
-  return Math.max(...ys) - Math.min(...ys);
-}
-</script>
 
 // كشف الوضعية بدقة أعلى (حل الخربطة)
 function detectPose(kp){
