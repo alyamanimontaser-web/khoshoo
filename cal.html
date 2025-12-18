@@ -133,25 +133,25 @@ function startTraining(){
     };
 
     // ====== مراحل التدريب ======
-    if(trainStage==='qiyam' && t.includes('الله')){
+    if(trainStage==='qiyam' && t.includes('one')){
       calibration.qiyam = data;
       trainStage='ruku';
       info.innerText='تم حفظ القيام ✔️ الآن اركع وقل: ركوع';
     }
 
-    else if(trainStage==='ruku' && t.includes('ركوع')){
+    else if(trainStage==='ruku' && t.includes('two')){
       calibration.ruku = data;
       trainStage='sujood';
       info.innerText='تم حفظ الركوع ✔️ الآن اسجد وقل: سجود';
     }
 
-    else if(trainStage==='sujood' && t.includes('سجود')){
+    else if(trainStage==='sujood' && t.includes('three')){
       calibration.sujood = data;
       trainStage='juloos';
       info.innerText='تم حفظ السجود ✔️ الآن اجلس وقل: جلوس';
     }
 
-    else if(trainStage==='juloos' && t.includes('جلوس')){
+    else if(trainStage==='juloos' && t.includes('four')){
       calibration.juloos = data;
       info.innerText='تم حفظ الجلوس ✔️ التدريب اكتمل';
       rec.stop();
