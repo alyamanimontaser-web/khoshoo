@@ -116,7 +116,7 @@ function startTraining(){
   rec.lang = 'ar-SA';
   rec.continuous = true;
 
-  info.innerText = 'قف وقل: الله أكبر';
+  info.innerText = 'قف وقل: واحد';
 
   rec.onresult = e => {
     if(!currentKeypoints) return;
@@ -133,7 +133,7 @@ function startTraining(){
     };
 
     // ====== مراحل التدريب ======
-    if(trainStage==='qiyam' && t.includes('يا هلا')){
+    if(trainStage==='qiyam' && t.includes('مرحبا')){
       calibration.qiyam = data;
       trainStage='ruku';
       info.innerText='تم حفظ القيام ✔️ الآن اركع وقل: ركوع';
