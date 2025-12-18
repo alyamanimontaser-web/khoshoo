@@ -25,7 +25,7 @@ button{padding:10px 16px;font-size:1rem;margin:6px}
 </head>
 <body>
 
-<h2>v تدريب أوضاع الصلاة (أمام الكاميرا)</h2>
+<h2>n تدريب أوضاع الصلاة (أمام الكاميرا)</h2>
 
 <button id="btnStart">تشغيل الكاميرا</button> <button id="btnTrain">بدء التدريب الصوتي</button>
 
@@ -133,32 +133,11 @@ function startTraining(){
     };
 
     // ====== مراحل التدريب ======
-    if(trainStage==='qiyam' && t.includes('مرحبا')){
-      calibration.qiyam = data;
-      trainStage='ruku';
-      info.innerText='تم حفظ القيام ✔️ الآن اركع وقل: ركوع';
-    }
-
-    else if(trainStage==='ruku' && t.includes('اثنان')){
-      calibration.ruku = data;
-      trainStage='sujood';
-      info.innerText='تم حفظ الركوع ✔️ الآن اسجد وقل: سجود';
-    }
-
-    else if(trainStage==='sujood' && t.includes('ثلاثة')){
-      calibration.sujood = data;
-      trainStage='juloos';
-      info.innerText='تم حفظ السجود ✔️ الآن اجلس وقل: جلوس';
-    }
-
-    else if(trainStage==='juloos' && t.includes('اربعة')){
-      calibration.juloos = data;
-      info.innerText='تم حفظ الجلوس ✔️ التدريب اكتمل';
-      rec.stop();
-
-      console.log('=== CALIBRATION READY ===');
-      console.log(JSON.stringify(calibration,null,2));
-    }
+  if(t.includes('واحد')){calibration.qiyam=data;info.innerText='تم حفظ القيام';}
+  if(t.includes('اثنان')){calibration.ruku=data;info.innerText='تم حفظ الركوع';}
+  if(t.includes('ثلاث')){calibration.sujood=data;info.innerText='تم حفظ السجود';}
+  if(t.includes('اربعه')){calibration.juloos=data;info.innerText='تم حفظ الجلوس';}
+  console.log('CALIBRATION',JSON.stringify(calibration,null,2));
   };
 
   rec.start();
