@@ -4,7 +4,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>رصد الصلاة الذكي – وضع التدريب اليدوي</title>
+<title>🕌 تدريب السجود والجلوس – تلقائي بالصوت</title>
+
+<!-- مكتبات مستقرة -->
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
 
@@ -23,30 +25,38 @@ button{padding:8px 14px;font-size:1rem;margin:5px}
 </head>
 <body>
 
-<h2>🕌 تدريب السجود والجلوس (تلقائي بالصوت)</h2>
+<h2>🅱️ تدريب تلقائي للسجود والجلوس</h2>
 
 <button id="btnStart">تشغيل الكاميرا</button> <button id="btnAutoTrain">بدء التدريب التلقائي</button>
 
 <div id="container">
-<video id="video" autoplay playsinline muted></video>
-<canvas id="canvas"></canvas>
+  <video id="video" autoplay playsinline muted></video>
+  <canvas id="canvas"></canvas>
 </div>
 
 <div id="panel">
-<div id="info">اضغط بدء التدريب</div>
-</div>
+  <div id="info">اضغط تشغيل الكاميرا</div>
 </div>
 
 <script>
+// ================= عناصر الصفحة =================
 const video=document.getElementById('video');
 const canvas=document.getElementById('canvas');
 const ctx=canvas.getContext('2d');
 const info=document.getElementById('info');
 
-let detector,currentKeypoints=null;
+let detector;
+let currentKeypoints=null;
+let autoStage='idle'; // idle | wait_qiyam | wait_ruku | wait_sujood | wait_juloos
 
-const TRAIN={sujood:null,juloos:null};
+const STAGE_TEXT={
+  wait_qiyam:'قف وقل: قيام',
+  wait_ruku:'اركع وقل: ركوع',
+  wait_sujood:'اسجد وقل: سجود',
+  wait_juloos:'اجلس وقل: جلوس'
+};
 
+// ================= أدوات رياضية =================
 function angle(a,b,c){
  const ab={x:a.x-b.x,y:a.y-b.y};
  const cb={x:c.x-b.x,y:c.y-b.y};
@@ -79,19 +89,24 @@ function extractFeatures(kp){
  };
 }
 
+// ================= الكاميرا =================
 async function startCamera(){
  const stream=await navigator.mediaDevices.getUserMedia({video:true});
  video.srcObject=stream;
  await video.play();
  canvas.width=video.videoWidth;
  canvas.height=video.videoHeight;
+
  detector=await poseDetection.createDetector(
   poseDetection.SupportedModels.BlazePose,
   {runtime:'mediapipe',modelType:'lite',solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/pose'}
  );
+
+ info.innerText='الكاميرا تعمل';
  requestAnimationFrame(loop);
 }
 
+// ================= الحلقة =================
 async function loop(){
  const poses=await detector.estimatePoses(video);
  ctx.clearRect(0,0,canvas.width,canvas.height);
@@ -99,21 +114,64 @@ async function loop(){
  requestAnimationFrame(loop);
 }
 
-document.getElementById('trainSujood').onclick=()=>{
- if(!currentKeypoints) return;
- TRAIN.sujood=extractFeatures(currentKeypoints);
- info.innerText='تم تدريب السجود';
- console.log('SUJOOD',TRAIN.sujood);
-};
+// ================= التدريب التلقائي بالصوت =================
+function startAutoTraining(){
+ autoStage='wait_qiyam';
+ info.innerText=STAGE_TEXT[autoStage];
+ startSpeech();
+}
 
-document.getElementById('trainJuloos').onclick=()=>{
- if(!currentKeypoints) return;
- TRAIN.juloos=extractFeatures(currentKeypoints);
- info.innerText='تم تدريب الجلوس';
- console.log('JULOOS',TRAIN.juloos);
-};
+function startSpeech(){
+ const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+ if(!SR){info.innerText='المتصفح لا يدعم الصوت';return;}
+ const rec=new SR();
+ rec.lang='ar-SA';
+ rec.continuous=true;
 
-document.getElementById('btnStart').onclick=startCamera;
+ rec.onresult=e=>{
+  const t=e.results[e.results.length-1][0].transcript.trim();
+
+  if(autoStage==='wait_qiyam' && t.includes('قيام') && currentKeypoints){
+    TRAIN.qiyam=extractFeatures(currentKeypoints);
+    console.log('AUTO QIYAM',TRAIN.qiyam);
+    autoStage='wait_ruku';
+    info.innerText=STAGE_TEXT[autoStage];
+  }
+
+  if(autoStage==='wait_ruku' && t.includes('ركوع') && currentKeypoints){
+    TRAIN.ruku=extractFeatures(currentKeypoints);
+    console.log('AUTO RUKU',TRAIN.ruku);
+    autoStage='wait_sujood';
+    info.innerText=STAGE_TEXT[autoStage];
+  }
+
+  if(autoStage==='wait_sujood' && t.includes('سجود') && currentKeypoints){
+    TRAIN.sujood=extractFeatures(currentKeypoints);
+    console.log('AUTO SUJOOD',TRAIN.sujood);
+    autoStage='wait_juloos';
+    info.innerText=STAGE_TEXT[autoStage];
+  }
+
+  if(autoStage==='wait_juloos' && t.includes('جلوس') && currentKeypoints){
+    TRAIN.juloos=extractFeatures(currentKeypoints);
+    console.log('AUTO JULOOS',TRAIN.juloos);
+    autoStage='done';
+    info.innerText='تم التدريب الكامل بنجاح – افتح Console';
+    rec.stop();
+  }();
+  }
+ };
+
+ rec.start();
+}
+
+// ================= ربط الأزرار (آمن) =================
+const btnStart=document.getElementById('btnStart');
+if(btnStart) btnStart.onclick=startCamera;
+
+const btnAuto=document.getElementById('btnAutoTrain');
+if(btnAuto) btnAuto.onclick=startAutoTraining;
+
 </script>
 
 </body>
