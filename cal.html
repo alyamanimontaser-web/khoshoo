@@ -3,10 +3,10 @@
 <html lang="ar">
 <head>
 <meta charset="UTF-8">
+<title>تدريب أوضاع الصلاة – معايرة تلقائية</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ok</title>
 
-<!-- مكتبات مستقرة -->
+<!-- TensorFlow + MediaPipe (نسخة مستقرة) -->
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
 
@@ -15,164 +15,126 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
 
 <style>
-body{background:#020617;color:white;font-family:tahoma;text-align:center}
+body{background:#020617;color:#fff;font-family:tahoma;text-align:center}
 #container{position:relative;width:640px;margin:auto}
 video,canvas{position:absolute;width:640px;height:480px;border-radius:12px}
-button{padding:8px 14px;font-size:1rem;margin:5px}
-#panel{margin-top:500px;font-size:1.2rem}
+button{padding:10px 16px;font-size:1rem;margin:6px}
+#panel{margin-top:500px;font-size:1.1rem}
 </style>
 
 </head>
 <body>
 
-<h2>تدريب تلقائي للسجود والجلوس تمام</h2>
+<h2>🕌 تدريب أوضاع الصلاة (أمام الكاميرا)</h2>
 
-<button id="btnStart">تشغيل الكاميرا</button> <button id="btnAutoTrain">بدء التدريب التلقائي</button>
+<button id="btnStart">تشغيل الكاميرا</button> <button id="btnTrain">بدء التدريب الصوتي</button>
 
 <div id="container">
-  <video id="video" autoplay playsinline muted></video>
-  <canvas id="canvas"></canvas>
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
 </div>
 
 <div id="panel">
-  <div id="info">اضغط تشغيل الكاميرا</div>
+<div id="info">اضغط تشغيل الكاميرا</div>
 </div>
 
 <script>
-// ================= عناصر الصفحة =================
 const video=document.getElementById('video');
 const canvas=document.getElementById('canvas');
 const ctx=canvas.getContext('2d');
 const info=document.getElementById('info');
 
-let detector;
-let currentKeypoints=null;
-let autoStage='idle'; // idle | wait_qiyam | wait_ruku | wait_sujood | wait_juloos
+let detector,currentKeypoints=null;
 
-const STAGE_TEXT={
-  wait_qiyam:'قف وقل: الله أكبر',
-  wait_ruku:'اركع وقل: ركوع',
-  wait_sujood:'اسجد وقل: سجود',
-  wait_juloos:'اجلس وقل: جلوس'
-};
+// ====== رسم الهيكل العظمي ======
+const EDGES=[
+ ['left_shoulder','right_shoulder'],['left_hip','right_hip'],
+ ['left_shoulder','left_elbow'],['left_elbow','left_wrist'],
+ ['right_shoulder','right_elbow'],['right_elbow','right_wrist'],
+ ['left_hip','left_knee'],['left_knee','left_ankle'],
+ ['right_hip','right_knee'],['right_knee','right_ankle'],
+ ['left_shoulder','left_hip'],['right_shoulder','right_hip']
+];
 
-// ================= أدوات رياضية =================
+function drawSkeleton(kp){
+ ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;
+ EDGES.forEach(([a,b])=>{
+  const p1=kp.find(p=>p.name===a&&p.score>0.5);
+  const p2=kp.find(p=>p.name===b&&p.score>0.5);
+  if(p1&&p2){ctx.beginPath();ctx.moveTo(p1.x,p1.y);ctx.lineTo(p2.x,p2.y);ctx.stroke();}
+ });
+}
+
+// ====== حسابات ======
+function bodyHeight(kp){
+ const v=kp.filter(p=>p.score>0.5).map(p=>p.y);
+ return Math.max(...v)-Math.min(...v);
+}
+
 function angle(a,b,c){
  const ab={x:a.x-b.x,y:a.y-b.y};
  const cb={x:c.x-b.x,y:c.y-b.y};
- const dot=ab.x*cb.x+ab.y*cb.y;
- const mag=Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y);
- return Math.acos(dot/mag)*180/Math.PI;
+ return Math.acos((ab.x*cb.x+ab.y*cb.y)/(Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y)))*180/Math.PI;
 }
 
-function bodyHeight(kp){
- const v=kp.filter(p=>p.score>0.5);
- const ys=v.map(p=>p.y);
- return Math.max(...ys)-Math.min(...ys);
-}
+// ====== بيانات المعايرة ======
+const calibration={camera:'front'};
 
-function extractFeatures(kp){
- const g=n=>kp.find(p=>p.name===n&&p.score>0.5);
- const hipL=g('left_hip'),hipR=g('right_hip');
- const kneeL=g('left_knee'),kneeR=g('right_knee');
- const ankleL=g('left_ankle'),ankleR=g('right_ankle');
- const shoulderL=g('left_shoulder'),shoulderR=g('right_shoulder');
- if(!hipL||!hipR||!kneeL||!kneeR||!ankleL||!ankleR||!shoulderL||!shoulderR) return null;
- const hip={x:(hipL.x+hipR.x)/2,y:(hipL.y+hipR.y)/2};
- const knee={x:(kneeL.x+kneeR.x)/2,y:(kneeL.y+kneeR.y)/2};
- const ankle={x:(ankleL.x+ankleR.x)/2,y:(ankleL.y+ankleR.y)/2};
- const shoulder={x:(shoulderL.x+shoulderR.x)/2,y:(shoulderL.y+shoulderR.y)/2};
- return {
-  bodyHeight: bodyHeight(kp),
-  kneeAngle: angle(hip,knee,ankle),
-  trunkAngle: angle(shoulder,hip,knee)
- };
-}
-
-// ================= الكاميرا =================
+// ====== تشغيل الكاميرا ======
 async function startCamera(){
  const stream=await navigator.mediaDevices.getUserMedia({video:true});
- video.srcObject=stream;
- await video.play();
- canvas.width=video.videoWidth;
- canvas.height=video.videoHeight;
-
+ video.srcObject=stream;await video.play();
+ canvas.width=video.videoWidth;canvas.height=video.videoHeight;
  detector=await poseDetection.createDetector(
   poseDetection.SupportedModels.BlazePose,
   {runtime:'mediapipe',modelType:'lite',solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/pose'}
  );
-
- info.innerText='الكاميرا تعمل';
+ info.innerText='الكاميرا تعمل – يمكنك بدء التدريب';
  requestAnimationFrame(loop);
 }
 
-// ================= الحلقة =================
+// ====== حلقة الرصد ======
 async function loop(){
- const poses=await detector.estimatePoses(video);
- ctx.clearRect(0,0,canvas.width,canvas.height);
- if(poses.length) currentKeypoints=poses[0].keypoints;
+ if(detector){
+  const poses=await detector.estimatePoses(video);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(poses.length){
+   currentKeypoints=poses[0].keypoints;
+   drawSkeleton(currentKeypoints);
+  }
+ }
  requestAnimationFrame(loop);
 }
 
-// ================= التدريب التلقائي بالصوت =================
-function startAutoTraining(){
- autoStage='wait_qiyam';
- info.innerText=STAGE_TEXT[autoStage];
- startSpeech();
-}
-
-function startSpeech(){
+// ====== تدريب صوتي ======
+function startTraining(){
  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
- if(!SR){info.innerText='المتصفح لا يدعم الصوت';return;}
- const rec=new SR();
- rec.lang='ar-SA';
- rec.continuous=true;
-
+ if(!SR){alert('المتصفح لا يدعم التعرف الصوتي');return;}
+ const rec=new SR();rec.lang='ar-SA';rec.continuous=true;
+ info.innerText='قل: الله أكبر / ركوع / سجود / جلوس';
  rec.onresult=e=>{
   const t=e.results[e.results.length-1][0].transcript.trim();
-
-  if(autoStage==='wait_qiyam' && (t.includes('الله') || t.includes('أكبر')) && currentKeypoints){
-
-    TRAIN.qiyam=extractFeatures(currentKeypoints);
-    console.log('AUTO QIYAM',TRAIN.qiyam);
-    autoStage='wait_ruku';
-    info.innerText=STAGE_TEXT[autoStage];
-  }
-
-  if(autoStage==='wait_ruku' && t.includes('ركوع') && currentKeypoints){
-    TRAIN.ruku=extractFeatures(currentKeypoints);
-    console.log('AUTO RUKU',TRAIN.ruku);
-    autoStage='wait_sujood';
-    info.innerText=STAGE_TEXT[autoStage];
-  }
-
-  if(autoStage==='wait_sujood' && t.includes('سجود') && currentKeypoints){
-    TRAIN.sujood=extractFeatures(currentKeypoints);
-    console.log('AUTO SUJOOD',TRAIN.sujood);
-    autoStage='wait_juloos';
-    info.innerText=STAGE_TEXT[autoStage];
-  }
-
-  if(autoStage==='wait_juloos' && t.includes('جلوس') && currentKeypoints){
-    TRAIN.juloos=extractFeatures(currentKeypoints);
-    console.log('AUTO JULOOS',TRAIN.juloos);
-    autoStage='done';
-    info.innerText='تم التدريب الكامل بنجاح – افتح Console';
-    rec.stop();
-
-  }
+  if(!currentKeypoints)return;
+  const g=n=>currentKeypoints.find(p=>p.name===n&&p.score>0.5);
+  const hip=g('right_hip'),knee=g('right_knee'),ankle=g('right_ankle'),shoulder=g('right_shoulder');
+  if(!hip||!knee||!ankle||!shoulder)return;
+  const data={
+   bodyHeight:bodyHeight(currentKeypoints),
+   kneeAngle:angle(hip,knee,ankle),
+   trunkAngle:angle(hip,shoulder,{x:hip.x,y:hip.y-100})
+  };
+  if(t.includes('الله')){calibration.qiyam=data;info.innerText='تم حفظ القيام';}
+  if(t.includes('ركوع')){calibration.ruku=data;info.innerText='تم حفظ الركوع';}
+  if(t.includes('سجود')){calibration.sujood=data;info.innerText='تم حفظ السجود';}
+  if(t.includes('جلوس')){calibration.juloos=data;info.innerText='تم حفظ الجلوس';}
+  console.log('CALIBRATION',JSON.stringify(calibration,null,2));
  };
-
  rec.start();
 }
 
-// ================= ربط الأزرار (آمن) =================
-const btnStart=document.getElementById('btnStart');
-if(btnStart) btnStart.onclick=startCamera;
-
-const btnAuto=document.getElementById('btnAutoTrain');
-if(btnAuto) btnAuto.onclick=startAutoTraining;
-
+// ====== أزرار ======
+document.getElementById('btnStart').onclick=startCamera;
+document.getElementById('btnTrain').onclick=startTraining;
 </script>
 
 </body>
