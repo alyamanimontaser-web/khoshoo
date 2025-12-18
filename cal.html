@@ -4,9 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>تدريب وضعيات الصلاة (سجود / جلوس)</title>
-
-<!-- TensorFlow + MediaPipe (مستقر) -->
+<title>رصد الصلاة الذكي – وضع التدريب اليدوي</title>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
 
@@ -15,147 +13,107 @@
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose"></script>
 
 <style>
-body { background:#020617; color:white; font-family:tahoma; text-align:center; }
-#container { position:relative; width:640px; margin:auto; }
-video,canvas { position:absolute; width:640px; height:480px; border-radius:12px; }
-button { padding:10px 16px; font-size:1rem; margin:6px; cursor:pointer; }
-#panel { margin-top:520px; font-size:1.1rem; }
-pre { background:#020617; color:#22c55e; text-align:left; padding:10px; width:640px; margin:10px auto; overflow:auto; }
+body{background:#020617;color:white;font-family:tahoma;text-align:center}
+#container{position:relative;width:640px;margin:auto}
+video,canvas{position:absolute;width:640px;height:480px;border-radius:12px}
+button{padding:8px 14px;font-size:1rem;margin:5px}
+#panel{margin-top:500px;font-size:1.2rem}
 </style>
 
 </head>
 <body>
 
-<h2>🕌 تدريب وضعيات الصلاة</h2>
-<p>ضع نفسك في الوضعية الصحيحة ثم اضغط زر التدريب</p>
+<h2>🕌 تدريب السجود والجلوس (تلقائي بالصوت)</h2>
 
-<button onclick="startCamera()">تشغيل الكاميرا</button> <button onclick="trainPose('sujood')">تدريب السجود</button> <button onclick="trainPose('juloos')">تدريب الجلوس</button> <button onclick="downloadCalibration()">تحميل ملف المعايرة</button>
+<button id="btnStart">تشغيل الكاميرا</button> <button id="btnAutoTrain">بدء التدريب التلقائي</button>
 
 <div id="container">
-  <video id="video" autoplay playsinline muted></video>
-  <canvas id="canvas"></canvas>
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
 </div>
 
 <div id="panel">
-  <div id="info">في انتظار تشغيل الكاميرا</div>
+<div id="info">اضغط بدء التدريب</div>
+</div>
 </div>
 
-<pre id="output"></pre>
-
 <script>
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
-const info = document.getElementById('info');
-const output = document.getElementById('output');
+const video=document.getElementById('video');
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+const info=document.getElementById('info');
 
-let detector;
+let detector,currentKeypoints=null;
 
-const calibration = {
-  camera: 'front',
-  sujood: null,
-  juloos: null
-};
+const TRAIN={sujood:null,juloos:null};
 
-async function startCamera() {
-  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-  video.srcObject = stream;
-  await video.play();
-  canvas.width = video.videoWidth;
-  canvas.height = video.videoHeight;
-
-  detector = await poseDetection.createDetector(
-    poseDetection.SupportedModels.BlazePose,
-    { runtime: 'mediapipe', modelType: 'lite', solutionPath: 'https://cdn.jsdelivr.net/npm/@mediapipe/pose' }
-  );
-
-  info.innerText = 'الكاميرا تعمل – استعد للتدريب';
-  requestAnimationFrame(drawLoop);
-}
-
-function drawLoop() {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  detector?.estimatePoses(video).then(poses => {
-    if (!poses.length) return;
-    const kp = poses[0].keypoints;
-    drawSkeleton(kp);
-  });
-  requestAnimationFrame(drawLoop);
-}
-
-function drawSkeleton(kp) {
-  const edges = [
-    ['left_shoulder','left_elbow'], ['left_elbow','left_wrist'],
-    ['right_shoulder','right_elbow'], ['right_elbow','right_wrist'],
-    ['left_shoulder','left_hip'], ['left_hip','left_knee'], ['left_knee','left_ankle'],
-    ['right_shoulder','right_hip'], ['right_hip','right_knee'], ['right_knee','right_ankle'],
-    ['left_shoulder','right_shoulder'], ['left_hip','right_hip']
-  ];
-  ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 2;
-  edges.forEach(([a,b]) => {
-    const p1 = kp.find(p=>p.name===a && p.score>0.5);
-    const p2 = kp.find(p=>p.name===b && p.score>0.5);
-    if(p1 && p2){ ctx.beginPath(); ctx.moveTo(p1.x,p1.y); ctx.lineTo(p2.x,p2.y); ctx.stroke(); }
-  });
+function angle(a,b,c){
+ const ab={x:a.x-b.x,y:a.y-b.y};
+ const cb={x:c.x-b.x,y:c.y-b.y};
+ const dot=ab.x*cb.x+ab.y*cb.y;
+ const mag=Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y);
+ return Math.acos(dot/mag)*180/Math.PI;
 }
 
 function bodyHeight(kp){
-  const v = kp.filter(p=>p.score>0.5);
-  const ys = v.map(p=>p.y);
-  return Math.max(...ys) - Math.min(...ys);
+ const v=kp.filter(p=>p.score>0.5);
+ const ys=v.map(p=>p.y);
+ return Math.max(...ys)-Math.min(...ys);
 }
 
-function angle(a,b,c){
-  const ab={x:a.x-b.x,y:a.y-b.y};
-  const cb={x:c.x-b.x,y:c.y-b.y};
-  const dot=ab.x*cb.x+ab.y*cb.y;
-  const mag=Math.hypot(ab.x,ab.y)*Math.hypot(cb.x,cb.y);
-  return Math.acos(dot/mag)*180/Math.PI;
+function extractFeatures(kp){
+ const g=n=>kp.find(p=>p.name===n&&p.score>0.5);
+ const hipL=g('left_hip'),hipR=g('right_hip');
+ const kneeL=g('left_knee'),kneeR=g('right_knee');
+ const ankleL=g('left_ankle'),ankleR=g('right_ankle');
+ const shoulderL=g('left_shoulder'),shoulderR=g('right_shoulder');
+ if(!hipL||!hipR||!kneeL||!kneeR||!ankleL||!ankleR||!shoulderL||!shoulderR) return null;
+ const hip={x:(hipL.x+hipR.x)/2,y:(hipL.y+hipR.y)/2};
+ const knee={x:(kneeL.x+kneeR.x)/2,y:(kneeL.y+kneeR.y)/2};
+ const ankle={x:(ankleL.x+ankleR.x)/2,y:(ankleL.y+ankleR.y)/2};
+ const shoulder={x:(shoulderL.x+shoulderR.x)/2,y:(shoulderL.y+shoulderR.y)/2};
+ return {
+  bodyHeight: bodyHeight(kp),
+  kneeAngle: angle(hip,knee,ankle),
+  trunkAngle: angle(shoulder,hip,knee)
+ };
 }
 
-async function trainPose(name) {
-  if (!detector) return alert('شغل الكاميرا أولاً');
-
-  const poses = await detector.estimatePoses(video);
-  if (!poses.length) return;
-
-  const kp = poses[0].keypoints;
-  const hipL = kp.find(p=>p.name==='left_hip');
-  const hipR = kp.find(p=>p.name==='right_hip');
-  const kneeL = kp.find(p=>p.name==='left_knee');
-  const kneeR = kp.find(p=>p.name==='right_knee');
-  const ankleL = kp.find(p=>p.name==='left_ankle');
-  const ankleR = kp.find(p=>p.name==='right_ankle');
-  const shoulderL = kp.find(p=>p.name==='left_shoulder');
-  const shoulderR = kp.find(p=>p.name==='right_shoulder');
-
-  const hip = hipL && hipR ? {x:(hipL.x+hipR.x)/2, y:(hipL.y+hipR.y)/2} : hipL || hipR;
-  const knee = kneeL && kneeR ? {x:(kneeL.x+kneeR.x)/2, y:(kneeL.y+kneeR.y)/2} : kneeL || kneeR;
-  const ankle = ankleL && ankleR ? {x:(ankleL.x+ankleR.x)/2, y:(ankleL.y+ankleR.y)/2} : ankleL || ankleR;
-  const shoulder = shoulderL && shoulderR ? {x:(shoulderL.x+shoulderR.x)/2, y:(shoulderL.y+shoulderR.y)/2} : shoulderL || shoulderR;
-
-  const data = {
-    bodyHeight: bodyHeight(kp),
-    kneeAngle: angle(hip,knee,ankle),
-    trunkAngle: angle(shoulder,hip,knee)
-  };
-
-  calibration[name] = data;
-  info.innerText = `تم تدريب وضعية ${name}`;
-  output.innerText = JSON.stringify(calibration, null, 2);
+async function startCamera(){
+ const stream=await navigator.mediaDevices.getUserMedia({video:true});
+ video.srcObject=stream;
+ await video.play();
+ canvas.width=video.videoWidth;
+ canvas.height=video.videoHeight;
+ detector=await poseDetection.createDetector(
+  poseDetection.SupportedModels.BlazePose,
+  {runtime:'mediapipe',modelType:'lite',solutionPath:'https://cdn.jsdelivr.net/npm/@mediapipe/pose'}
+ );
+ requestAnimationFrame(loop);
 }
 
-function downloadCalibration() {
-  if (!calibration.sujood || !calibration.juloos) {
-    alert('يجب تدريب السجود والجلوس أولاً');
-    return;
-  }
-  const blob = new Blob([JSON.stringify(calibration, null, 2)], {type:'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'calibration.json';
-  a.click();
+async function loop(){
+ const poses=await detector.estimatePoses(video);
+ ctx.clearRect(0,0,canvas.width,canvas.height);
+ if(poses.length) currentKeypoints=poses[0].keypoints;
+ requestAnimationFrame(loop);
 }
+
+document.getElementById('trainSujood').onclick=()=>{
+ if(!currentKeypoints) return;
+ TRAIN.sujood=extractFeatures(currentKeypoints);
+ info.innerText='تم تدريب السجود';
+ console.log('SUJOOD',TRAIN.sujood);
+};
+
+document.getElementById('trainJuloos').onclick=()=>{
+ if(!currentKeypoints) return;
+ TRAIN.juloos=extractFeatures(currentKeypoints);
+ info.innerText='تم تدريب الجلوس';
+ console.log('JULOOS',TRAIN.juloos);
+};
+
+document.getElementById('btnStart').onclick=startCamera;
 </script>
 
 </body>
