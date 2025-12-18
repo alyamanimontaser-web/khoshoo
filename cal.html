@@ -45,6 +45,7 @@ const ctx=canvas.getContext('2d');
 const info=document.getElementById('info');
 
 let detector,currentKeypoints=null;
+let trainStage = 'qiyam';
 
 // ====== رسم الهيكل العظمي ======
 const EDGES=[
@@ -108,29 +109,61 @@ async function loop(){
 
 // ====== تدريب صوتي ======
 function startTraining(){
- const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
- if(!SR){alert('المتصفح لا يدعم التعرف الصوتي');return;}
- const rec=new SR();rec.lang='ar-SA';rec.continuous=true;
- info.innerText='قل: الله أكبر / ركوع / سجود / جلوس';
- rec.onresult=e=>{
-  const t=e.results[e.results.length-1][0].transcript.trim();
-  if(!currentKeypoints)return;
-  const g=n=>currentKeypoints.find(p=>p.name===n&&p.score>0.5);
-  const hip=g('right_hip'),knee=g('right_knee'),ankle=g('right_ankle'),shoulder=g('right_shoulder');
-  if(!hip||!knee||!ankle||!shoulder)return;
-  const data={
-   bodyHeight:bodyHeight(currentKeypoints),
-   kneeAngle:angle(hip,knee,ankle),
-   trunkAngle:angle(hip,shoulder,{x:hip.x,y:hip.y-100})
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!SR){ alert('المتصفح لا يدعم التعرف الصوتي'); return; }
+
+  const rec = new SR();
+  rec.lang = 'ar-SA';
+  rec.continuous = true;
+
+  info.innerText = 'قف وقل: الله أكبر';
+
+  rec.onresult = e => {
+    if(!currentKeypoints) return;
+    const t = e.results[e.results.length-1][0].transcript.trim();
+
+    const g=n=>currentKeypoints.find(p=>p.name===n&&p.score>0.5);
+    const hip=g('right_hip'),knee=g('right_knee'),ankle=g('right_ankle'),shoulder=g('right_shoulder');
+    if(!hip||!knee||!ankle||!shoulder) return;
+
+    const data = {
+      bodyHeight: bodyHeight(currentKeypoints),
+      kneeAngle: angle(hip,knee,ankle),
+      trunkAngle: angle(hip,shoulder,{x:hip.x,y:hip.y-100})
+    };
+
+    // ====== مراحل التدريب ======
+    if(trainStage==='qiyam' && t.includes('الله')){
+      calibration.qiyam = data;
+      trainStage='ruku';
+      info.innerText='تم حفظ القيام ✔️ الآن اركع وقل: ركوع';
+    }
+
+    else if(trainStage==='ruku' && t.includes('ركوع')){
+      calibration.ruku = data;
+      trainStage='sujood';
+      info.innerText='تم حفظ الركوع ✔️ الآن اسجد وقل: سجود';
+    }
+
+    else if(trainStage==='sujood' && t.includes('سجود')){
+      calibration.sujood = data;
+      trainStage='juloos';
+      info.innerText='تم حفظ السجود ✔️ الآن اجلس وقل: جلوس';
+    }
+
+    else if(trainStage==='juloos' && t.includes('جلوس')){
+      calibration.juloos = data;
+      info.innerText='تم حفظ الجلوس ✔️ التدريب اكتمل';
+      rec.stop();
+
+      console.log('=== CALIBRATION READY ===');
+      console.log(JSON.stringify(calibration,null,2));
+    }
   };
-  if(t.includes('الله')){calibration.qiyam=data;info.innerText='تم حفظ القيام';}
-  if(t.includes('ركوع')){calibration.ruku=data;info.innerText='تم حفظ الركوع';}
-  if(t.includes('سجود')){calibration.sujood=data;info.innerText='تم حفظ السجود';}
-  if(t.includes('جلوس')){calibration.juloos=data;info.innerText='تم حفظ الجلوس';}
-  console.log('CALIBRATION',JSON.stringify(calibration,null,2));
- };
- rec.start();
+
+  rec.start();
 }
+
 
 // ====== أزرار ======
 document.getElementById('btnStart').onclick=startCamera;
