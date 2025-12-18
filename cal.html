@@ -137,7 +137,8 @@ function startTraining(){
   if(t.includes('اثنان')){calibration.ruku=data;info.innerText='تم حفظ الركوع';}
   if(t.includes('ثلاث')){calibration.sujood=data;info.innerText='تم حفظ السجود';}
   if(t.includes('اربعه')){calibration.juloos=data;info.innerText='تم حفظ الجلوس';}
-  console.log('CALIBRATION',JSON.stringify(calibration,null,2));
+        console.log('=== CALIBRATION READY ===');
+      console.log(JSON.stringify(calibration,null,2));
   };
 
   rec.start();
